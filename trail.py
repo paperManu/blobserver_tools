@@ -256,7 +256,6 @@ def mainLoop(maxHistory = 50, pointLifetime = 1e6, lineDetectionLevel = 64, circ
         oscServer.recv(33)
 
         cleanLog = []
-        print("Number of trails: " + str(len(trails)))
         for i in trails:
             if trails[i][0].isAlive() == False:
                 cleanLog.append(i)
