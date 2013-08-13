@@ -223,14 +223,14 @@ def trail_callback(path, args, types, src, user_data):
 #*************#
 # Draws all recognized shapes
 def drawTrails(trails):
-    img = zeros((IMAGE_SIZE[1], IMAGE_SIZE[0]))
+    img = zeros((IMAGE_SIZE[1], IMAGE_SIZE[0], 3))
     for i in trails:
         line = trails[i][0].identify()
         if len(line) == 0:
             continue
         start = (0, line[1])
         end = (IMAGE_SIZE[0], line[0] * IMAGE_SIZE[0] + line[1])
-        cv.line(img, start, end, (255, 255, 255))
+        cv.line(img, start, end, (255, 255, 0))
 
     for i in trails:
         circle = trails[i][1].identify()
@@ -239,6 +239,25 @@ def drawTrails(trails):
         center = (circle[0], circle[1])
         radius = circle[2]
         cv.circle(img, center, radius, (255, 255, 255))
+
+        contours = []
+        #for index in range(0, len(trails[i][1]._rawHistory)):
+        for index in range(len(trails[i][1]._rawHistory) - trails[i][1]._usedLength, len(trails[i][1]._rawHistory)):
+            vec = []
+            for j in range(0, len(trails[i][1]._rawHistory[index].point)):
+                vec.append(trails[i][1]._rawHistory[index].point[j])
+            contours.append(vec)
+        if len(contours) > 0:
+            cv.polylines(img, [array(contours, int32)], False, (0, 0, 255))
+
+        contours = []
+        for index in range(0, len(trails[i][1]._rawHistory) - trails[i][1]._usedLength):
+            vec = []
+            for j in range(0, len(trails[i][1]._rawHistory[index].point)):
+                vec.append(trails[i][1]._rawHistory[index].point[j])
+            contours.append(vec)
+        if len(contours) > 0:
+            cv.polylines(img, [array(contours, int32)], False, (255, 0, 0))
 
     cv.imshow("Trails", img)
 
@@ -268,11 +287,12 @@ def mainLoop(maxHistory = 50, pointLifetime = 1e6, lineDetectionLevel = 64, circ
 
             # Line trails are updated first, then circles
             sol, res = trails[i][0].track()
-            if VERBOSE:
-                print(trails[i][0].identify().T, res)
+            #if VERBOSE:
+            #    print(trails[i][0].identify().T, res)
             sol, res = trails[i][1].track()
             if VERBOSE:
-                print(trails[i][1].identify().T, res)
+                #print(trails[i][1].identify().T, res)
+                print(trails[i][1].identify().T)
 
         for i in cleanLog:
             trails.pop(i)
