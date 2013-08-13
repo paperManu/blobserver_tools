@@ -287,12 +287,11 @@ def mainLoop(maxHistory = 50, pointLifetime = 1e6, lineDetectionLevel = 64, circ
 
             # Line trails are updated first, then circles
             sol, res = trails[i][0].track()
-            #if VERBOSE:
-            #    print(trails[i][0].identify().T, res)
+            if VERBOSE:
+                print(trails[i][0].identify().T, res)
             sol, res = trails[i][1].track()
             if VERBOSE:
-                #print(trails[i][1].identify().T, res)
-                print(trails[i][1].identify().T)
+                print(trails[i][1].identify().T, res)
 
         for i in cleanLog:
             trails.pop(i)
