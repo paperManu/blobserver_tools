@@ -44,7 +44,7 @@ def mainLoop(maxPathwayHistory = MAX_PATHWAY_HISTORY, maxTrailHistory = MAX_TRAI
 
     # Set the pathways list
     pathmaps = []
-    pathmaps.append(loadImage("path.png"))
+    pathmaps.append(loadImage("assets/path.png"))
 
     pathways = {}
     trails = {}

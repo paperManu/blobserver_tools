@@ -218,7 +218,7 @@ def mainLoop(maxHistory = 300, pointLifetime = 1e6):
     # The list containing all possible pathways.
     # Here, only one is loaded
     pathmaps = []
-    pathmaps.append(loadImage("path.png"))
+    pathmaps.append(loadImage("assets/path.png"))
 
     # This dict contains one list of Pathway (the class) per blob ID
     pathways = {}
