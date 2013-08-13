@@ -6,7 +6,7 @@ import cv2 as cv
 from time import time, sleep
 from numpy import *
 
-VERBOSE = False
+VERBOSE = True
 SHOW_CV = True
 
 # Input resolution (from camera)
@@ -41,6 +41,7 @@ class Trail(object):
 
         self._sol = array([])
         self._res = 0
+        self._usedLength = 0
 
         self._projectionMat = array([])
 
@@ -119,6 +120,7 @@ class Trail(object):
             b.append([self._history[index].point[len(self._history[index].point)-1]])
 
         sol, res = self.__trackOnce(array(a), array(b))
+        usedLength = self._trackLength
 
         while len(a) + self._trackStep <= self._maxLength and len(a) + self._trackStep <= len(self._history):
             for i in range(len(a), len(a) + self._trackStep):
@@ -130,13 +132,16 @@ class Trail(object):
                 b.append([self._history[index].point[len(self._history[index].point)-1]])
 
             newSol, newRes = self.__trackOnce(array(a), array(b))
+            newUsedLength = len(a)
 
             if newRes < res:
                 sol = newSol
                 res = newRes
+                usedLength = newUsedLength
 
         self._sol = sol
         self._res = res
+        self._usedLength = usedLength
 
         return sol, res
 
@@ -167,7 +172,7 @@ class Trail_Circle(Trail):
 
         # We compute the completeness of the circle
         points = []
-        for i in range(0, self._trackLength):
+        for i in range(0, self._usedLength):
             vec = []
             vec.append(self._rawHistory[i].point[0])
             vec.append(self._rawHistory[i].point[1])
