@@ -6,8 +6,9 @@ import cv2 as cv
 from time import time, sleep
 from numpy import *
 
-VERBOSE = True
+VERBOSE = False
 SHOW_CV = True
+WRITE_CV = False
 
 # Input resolution (from camera)
 IMAGE_SIZE = [640, 480]
@@ -15,6 +16,8 @@ IMAGE_SIZE = [640, 480]
 # Projection parameters
 PROJECTION_IN = array([[0, 0], [640, 0], [640, 480], [0, 480]], float32)
 PROJECTION_OUT = array([[0, 0], [640, 0], [640, 480], [0, 480]], float32)
+
+FRAMENUMBER = 0
 
 #*************#
 class TimedPoint(object):
@@ -172,7 +175,7 @@ class Trail_Circle(Trail):
 
         # We compute the completeness of the circle
         points = []
-        for i in range(0, self._usedLength):
+        for i in range(len(self._rawHistory) - self._usedLength, len(self._rawHistory)):
             vec = []
             vec.append(self._rawHistory[i].point[0])
             vec.append(self._rawHistory[i].point[1])
@@ -240,6 +243,8 @@ def drawTrails(trails):
         radius = circle[2]
         cv.circle(img, center, radius, (255, 255, 255))
 
+        cv.putText(img, str(circle[3][0]), (circle[0], circle[1]), cv.FONT_HERSHEY_PLAIN, 1, (255, 255, 255))
+
         contours = []
         #for index in range(0, len(trails[i][1]._rawHistory)):
         for index in range(len(trails[i][1]._rawHistory) - trails[i][1]._usedLength, len(trails[i][1]._rawHistory)):
@@ -261,8 +266,12 @@ def drawTrails(trails):
 
     cv.imshow("Trails", img)
 
+    if WRITE_CV:
+        cv.imwrite("img_" + str(FRAMENUMBER) + ".png", img)
+
 #*************#
 def mainLoop(maxHistory = 50, pointLifetime = 1e6, lineDetectionLevel = 64, circleDetectionLevel = 8192, circleMaxRadius = 256):
+    global FRAMENUMBER
     try:
         oscServer = liblo.Server(9000);
     except liblo.AddressError, err:
@@ -300,6 +309,7 @@ def mainLoop(maxHistory = 50, pointLifetime = 1e6, lineDetectionLevel = 64, circ
             drawTrails(trails)
 
         cv.waitKey(5)
+        FRAMENUMBER += 1
 
 #*************#
 def usage():
