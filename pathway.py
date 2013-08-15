@@ -3,6 +3,7 @@
 import liblo
 import sys
 import cv2 as cv
+from copy import deepcopy
 from time import time, sleep
 from numpy import *
 
@@ -84,7 +85,7 @@ class Pathway(object):
     # Adds a new position of the object to the path, computes its projection on the pathway (if close to it),
     # and updates the history to get rid of older positions
     def follow(self, point):
-        pos = point.point
+        pos = deepcopy(point.point)
         if len(self._projectionMat) > 0:
             projPoint = array([[pos]], float32)
             projPoint = cv.perspectiveTransform(projPoint, self._projectionMat)

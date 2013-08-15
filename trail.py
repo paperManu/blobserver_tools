@@ -16,7 +16,7 @@ IMAGE_SIZE = [640, 480]
 
 # Projection parameters
 PROJECTION_IN = array([[0, 0], [640, 0], [640, 480], [0, 480]], float32)
-PROJECTION_OUT = array([[0, 0], [640, 0], [640, 240], [0, 240]], float32)
+PROJECTION_OUT = array([[0, 0], [640, 0], [640, 480], [0, 480]], float32)
 
 FRAMENUMBER = 0
 
