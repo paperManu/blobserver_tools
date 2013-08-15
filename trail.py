@@ -3,6 +3,7 @@
 import liblo
 import sys
 import cv2 as cv
+from copy import deepcopy
 from time import time, sleep
 from numpy import *
 
@@ -15,7 +16,7 @@ IMAGE_SIZE = [640, 480]
 
 # Projection parameters
 PROJECTION_IN = array([[0, 0], [640, 0], [640, 480], [0, 480]], float32)
-PROJECTION_OUT = array([[0, 0], [640, 0], [640, 480], [0, 480]], float32)
+PROJECTION_OUT = array([[0, 0], [640, 0], [640, 240], [0, 240]], float32)
 
 FRAMENUMBER = 0
 
@@ -63,7 +64,7 @@ class Trail(object):
 
     # Adds a new position to the history
     def follow(self, point):
-        newPoint = point
+        newPoint = deepcopy(point)
         if len(self._projectionMat) > 0:
             projPoint = array([[point.point]], float32)
             projPoint = cv.perspectiveTransform(projPoint, self._projectionMat)
