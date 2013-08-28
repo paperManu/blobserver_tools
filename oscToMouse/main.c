@@ -1,3 +1,4 @@
+#include <signal.h>
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -7,6 +8,8 @@
 
 #define CLICK_SPEED 5
 #define CLICK_LENGTH 5
+
+int gIsRunning;
 
 /*************/
 typedef void state_on_enter_handler(void** state, void* from, void* user_data);
@@ -31,6 +34,13 @@ State_t* state_new(char* name)
     state->nbr = 0;
     state->signals = (char**)malloc(sizeof(char*));
     state->states = (void**)malloc(sizeof(State_t*));
+}
+
+State_t* state_free(State_t* state)
+{
+    free(state->signals);
+    free(state->states);
+    free(state);
 }
 
 void state_add_signal(State_t* state, char* signal, State_t* output_state)
@@ -74,15 +84,26 @@ void state_send_signal(State_t** state, char* signal, void* user_data)
     {
         if (strcmp(signal, st->signals[i]) == 0)
         {
+            State_t* destination = st->states[i];
+
             if (st->leave != NULL)
-                st->leave((void**)&st, st->states[i], user_data);
+                st->leave((void**)&st, destination, user_data);
             if (((State_t*)st->states[i])->enter != NULL)
-                ((State_t*)st->states[i])->enter(&st->states[i], st, user_data);
-            *state = st->states[i];
+                ((State_t*)st->states[i])->enter((void**)&destination, st, user_data);
+            *state = destination;
             return;
         }
     }
 }
+
+/*************/
+typedef struct
+{
+    xdo_t* display;
+    float x, y;
+    mapper_timetag_t timetag;
+    int updated;
+} Data_t;
 
 /*************/
 void on_enter_wait(void** state, void* from, void* user_data)
@@ -104,10 +125,6 @@ void on_enter_wait(void** state, void* from, void* user_data)
         state_send_signal(&curr, "enough", NULL);
         *state = curr;
     }
-
-    if (user_data == NULL)
-        return;
-    *(int*)user_data = frames;
 }
 
 /*************/
@@ -115,25 +132,10 @@ void on_enter_click(void** state, void* from, void* user_data)
 {
     State_t* curr = *(State_t**)state;
     State_t* prev = (State_t*)from;
-
-    static int frames = 0;
+    Data_t* data = user_data;
 
     if (strcmp(prev->name, "wait") == 0)
-        frames = 0;
-    else if (strcmp(prev->name, "click") == 0)
-        frames++;
-    else
-        return;
-
-    if (frames > CLICK_LENGTH)
-    {
-        state_send_signal(&curr, "clicked", NULL);
-        *state = curr;
-    }
-
-    if (user_data == NULL)
-        return;
-    *(int*)user_data = frames;
+        xdo_click(data->display, CURRENTWINDOW, 1);
 }
 
 /*************/
@@ -151,20 +153,17 @@ State_t* init_state_machine()
     state_add_signal(wait, "position", wait);
     state_add_signal(wait, "enough", move);
     state_add_signal(wait, "no_position", click);
-    state_add_signal(click, "clicked", root);
+    state_add_signal(click, "no_position", root);
+    state_add_signal(click, "position", root);
     state_add_signal(move, "no_position", root);
 
     return root;
 }
 
 /*************/
-typedef struct
+void free_state_machine(State_t* root)
 {
-    xdo_t* display;
-    float x, y;
-    mapper_timetag_t timetag;
-    int updated;
-} Data_t;
+}
 
 /*************/
 void depthmsg_handler(mapper_signal msig, mapper_db_signal props, int instance_id, void *value, int count, mapper_timetag_t* tt)
@@ -183,9 +182,22 @@ void depthmsg_handler(mapper_signal msig, mapper_db_signal props, int instance_i
 }
 
 /*************/
+void leave(int sig)
+{
+    gIsRunning = 0;
+}
+
+/*************/
 int main(int argc, char** argv)
 {
-    State_t* current = init_state_machine();
+    (void) signal(SIGINT, leave);
+
+    int msgLength = 4;
+    if (argc > 1)
+        msgLength = atoi(argv[1]);
+
+    State_t* root = init_state_machine();
+    State_t* current = root;
 
     xdo_t* xdo_display = xdo_new(NULL);
 
@@ -196,28 +208,30 @@ int main(int argc, char** argv)
     data.updated = 0;
 
     mapper_device receiver = mdev_new("oscToMouse", 9700, 0);
-    mapper_signal signal = mdev_add_input(receiver, "/blobserver", 4, 'f', 0, 0, 0, depthmsg_handler, &data);
+    mapper_signal signal = mdev_add_input(receiver, "/blobserver", msgLength, 'f', 0, 0, 0, depthmsg_handler, &data);
 
-    while(1)
+    gIsRunning = 1;
+    while(gIsRunning)
     {
         mdev_poll(receiver, 50);
         int value;
+
         if (data.updated)
         {
-            state_send_signal(&current, "position", &value);
+            state_send_signal(&current, "position", &data);
         }
         else
         {
-            state_send_signal(&current, "no_position", &value);
+            state_send_signal(&current, "no_position", &data);
         }
 
         printf("%f %f - %s\n", data.x, data.y, current->name);
 
         if (strcmp(current->name, "move") == 0)
             xdo_mousemove(data.display, data.x, data.y, 0);
-        else if (strcmp(current->name, "click") == 0)
-            xdo_click(data.display, CURRENTWINDOW, 1);
 
         data.updated = 0;
     }
+
+    free_state_machine(root);
 }
