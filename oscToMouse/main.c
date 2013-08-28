@@ -3,11 +3,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include <xdo.h>
+#include <opencv/cv.h>
 #include <mapper/mapper.h>
+#include <xdo.h>
 
 #define CLICK_SPEED 5
 #define CLICK_LENGTH 5
+#define MARKER_SIZE 128
 
 int gIsRunning;
 
@@ -105,6 +107,12 @@ typedef struct
     int updated;
 } Data_t;
 
+typedef struct
+{
+    int set;
+    float x, y;
+} Calib_t;
+
 /*************/
 void on_enter_wait(void** state, void* from, void* user_data)
 {
@@ -135,7 +143,10 @@ void on_enter_click(void** state, void* from, void* user_data)
     Data_t* data = user_data;
 
     if (strcmp(prev->name, "wait") == 0)
+    {
+        xdo_mousemove(data->display, data->x, data->y, 0);
         xdo_click(data->display, CURRENTWINDOW, 1);
+    }
 }
 
 /*************/
@@ -166,10 +177,9 @@ void free_state_machine(State_t* root)
 }
 
 /*************/
-void depthmsg_handler(mapper_signal msig, mapper_db_signal props, int instance_id, void *value, int count, mapper_timetag_t* tt)
+void mousemsg_handler(mapper_signal msig, mapper_db_signal props, int instance_id, void *value, int count, mapper_timetag_t* tt)
 {
     Data_t* data = (Data_t*)props->user_data;
-    xdo_t* xdo_display = data->display;
 
     int x, y;
     x = ((float*)value)[1];
@@ -179,6 +189,24 @@ void depthmsg_handler(mapper_signal msig, mapper_db_signal props, int instance_i
     data->y = y;
     data->timetag = *tt;
     data->updated = 1;
+}
+
+/*************/
+void calibmsg_handler(mapper_signal msig, mapper_db_signal props, int instance_id, void* value, int count, mapper_timetag_t* tt)
+{
+    Calib_t* calib = (Calib_t*)props->user_data;
+
+    int id, x, y;
+    id = ((float*)value)[0];
+    x = ((float*)value)[1];
+    y = ((float*)value)[2];
+
+    if (id < 4)
+    {
+        calib[id].set = 1;
+        calib[id].x = x;
+        calib[id].y = y;
+    }
 }
 
 /*************/
@@ -207,8 +235,13 @@ int main(int argc, char** argv)
     data.y = 0.f;
     data.updated = 0;
 
+    Calib_t calib[4];
+    for (int i = 0; i < 4; ++i)
+        calib[i].set = 0;
+
     mapper_device receiver = mdev_new("oscToMouse", 9700, 0);
-    mapper_signal signal = mdev_add_input(receiver, "/blobserver", msgLength, 'f', 0, 0, 0, depthmsg_handler, &data);
+    mapper_signal sigMouse = mdev_add_input(receiver, "/mouse", msgLength, 'f', 0, 0, 0, mousemsg_handler, &data);
+    mapper_signal sigCalib = mdev_add_input(receiver, "/calibration", 4, 'f', 0, 0, 0, calibmsg_handler, &calib);
 
     gIsRunning = 1;
     while(gIsRunning)
@@ -226,6 +259,60 @@ int main(int argc, char** argv)
         }
 
         printf("%f %f - %s\n", data.x, data.y, current->name);
+
+        int allSet = 1;
+        for (int i = 0; i < 4; ++i)
+        {
+            if (calib[i].set)
+                printf("%i - %f %f\n", i, calib[i].x, calib[i].y);
+            else
+                allSet = 0;
+        }
+        if (allSet)
+        {
+            CvPoint2D32f points[4];
+            for (int i = 0; i < 4; ++i)
+            {
+                points[i].x = calib[i].x;
+                points[i].y = calib[i].y;
+            }
+
+            CvPoint2D32f outPoints[4];
+            outPoints[0].x = MARKER_SIZE;
+            outPoints[0].y = MARKER_SIZE;
+            outPoints[1].x = 1400.f - MARKER_SIZE;
+            outPoints[1].y = MARKER_SIZE;
+            outPoints[2].x = MARKER_SIZE;
+            outPoints[2].y = 1050.f - MARKER_SIZE;
+            outPoints[3].x = 1400.f - MARKER_SIZE;
+            outPoints[3].y = 1050.f - MARKER_SIZE;
+
+            CvMat* perspectiveMatrix = cvCreateMat(3, 3, CV_64F);
+            cvGetPerspectiveTransform(points, outPoints, perspectiveMatrix);
+
+            CvMat* p = cvCreateMat(1, 1, CV_64FC2);
+            CvMat* h = cvCreateMat(1, 1, CV_64FC2);
+
+            CvScalar current;
+            current.val[0] = data.x;
+            current.val[1] = data.y;
+
+            cvSet2D(p, 0, 0, current);
+            cvPerspectiveTransform(p, h, perspectiveMatrix);
+            current = cvGet2D(h, 0, 0);
+
+            if (current.val[0] > 0.f && current.val[0] < 1600.f)
+                data.x = current.val[0];
+            else
+                data.x = 800.f;
+            
+            if (current.val[1] > 0.f && current.val[1] < 1200.f)
+                data.y = current.val[1];
+            else
+                data.y = 600.f;
+
+            printf("--- %f %f\n", current.val[0], current.val[1]);
+        }
 
         if (strcmp(current->name, "move") == 0)
             xdo_mousemove(data.display, data.x, data.y, 0);
