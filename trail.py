@@ -203,8 +203,8 @@ class Trail_Circle(Trail):
 #*************#
 # Callback used by liblo when a new position for a blob is received
 def trail_callback(path, args, types, src, user_data):
-    blobPos = array([args[0], args[1]])
-    blobId = args[5]
+    blobPos = array([args[1], args[2]])
+    blobId = args[0]
 
     trails = user_data[0]
     maxHistory = user_data[1]

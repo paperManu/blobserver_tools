@@ -178,8 +178,8 @@ class Pathway(object):
 #*************#
 # Callback used by liblo, when a new adequate OSC message is caught
 def pathway_callback(path, args, types, src, user_data):
-    blobPos = array([args[0], args[1]])
-    blobId = args[5]
+    blobPos = array([args[1], args[2]])
+    blobId = args[0]
 
     pathways = user_data[0]
     pathmaps = user_data[1]
