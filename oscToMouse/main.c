@@ -103,6 +103,7 @@ typedef struct
 {
     xdo_t* display;
     float x, y;
+    int contact;
     mapper_timetag_t timetag;
     int updated;
 } Data_t;
@@ -114,25 +115,13 @@ typedef struct
 } Calib_t;
 
 /*************/
-void on_enter_wait(void** state, void* from, void* user_data)
+void on_enter_move(void** state, void* from, void* user_data)
 {
     State_t* curr = *(State_t**)state;
     State_t* prev = (State_t*)from;
+    Data_t* data = user_data;
 
-    static int frames = 0;
-
-    if (strcmp(prev->name, "root") == 0)
-        frames = 0;
-    else if (strcmp(prev->name, "wait") == 0)
-        frames++;
-    else
-        return;
-
-    if (frames > CLICK_SPEED)
-    {
-        state_send_signal(&curr, "enough", NULL);
-        *state = curr;
-    }
+    xdo_mousemove(data->display, data->x, data->y, 0);
 }
 
 /*************/
@@ -142,31 +131,50 @@ void on_enter_click(void** state, void* from, void* user_data)
     State_t* prev = (State_t*)from;
     Data_t* data = user_data;
 
-    if (strcmp(prev->name, "wait") == 0)
+    static int frames = 0;
+
+    if (strcmp(prev->name, "move") == 0)
     {
         xdo_mousemove(data->display, data->x, data->y, 0);
-        xdo_click(data->display, CURRENTWINDOW, 1);
+        frames = 0;
     }
+    else if (strcmp(prev->name, "click") == 0)
+    {
+        xdo_mousemove(data->display, data->x, data->y, 0);
+        frames++;
+
+        if (frames == CLICK_SPEED)
+            xdo_mousedown(data->display, CURRENTWINDOW, 1);
+    }
+}
+
+/*************/
+void on_leave_click(void** state, void* to, void* user_data)
+{
+    State_t* curr = *(State_t**)state;
+    State_t* next = (State_t*)to;
+    Data_t* data = user_data;
+
+    if (strcmp(next->name, "click") != 0)
+        xdo_mouseup(data->display, CURRENTWINDOW, 1);
 }
 
 /*************/
 State_t* init_state_machine()
 {
     State_t* root = state_new("root");
-    State_t* wait = state_new("wait");
     State_t* click = state_new("click");
     State_t* move = state_new("move");
 
-    state_set_enter_handler(wait, on_enter_wait);
     state_set_enter_handler(click, on_enter_click);
+    state_set_leave_handler(click, on_leave_click);
 
-    state_add_signal(root, "position", wait);
-    state_add_signal(wait, "position", wait);
-    state_add_signal(wait, "enough", move);
-    state_add_signal(wait, "no_position", click);
-    state_add_signal(click, "no_position", root);
-    state_add_signal(click, "position", root);
+    state_add_signal(root, "position", move);
+    state_add_signal(move, "contact", click);
     state_add_signal(move, "no_position", root);
+    state_add_signal(click, "position", move);
+    state_add_signal(click, "contact", click);
+    state_add_signal(click, "no_position", root);
 
     return root;
 }
@@ -181,12 +189,14 @@ void mousemsg_handler(mapper_signal msig, mapper_db_signal props, int instance_i
 {
     Data_t* data = (Data_t*)props->user_data;
 
-    int x, y;
+    int x, y, contact;
     x = ((float*)value)[1];
     y = ((float*)value)[2];
+    contact = ((float*)value)[5];
 
     data->x = x;
     data->y = y;
+    data->contact = contact;
     data->timetag = *tt;
     data->updated = 1;
 }
@@ -233,6 +243,7 @@ int main(int argc, char** argv)
     data.display = xdo_display;
     data.x = 0.f;
     data.y = 0.f;
+    data.contact = 0;
     data.updated = 0;
 
     Calib_t calib[4];
@@ -240,25 +251,14 @@ int main(int argc, char** argv)
         calib[i].set = 0;
 
     mapper_device receiver = mdev_new("oscToMouse", 9700, 0);
-    mapper_signal sigMouse = mdev_add_input(receiver, "/mouse", msgLength, 'f', 0, 0, 0, mousemsg_handler, &data);
+    mapper_signal sigMouse = mdev_add_input(receiver, "/mouse", 6, 'f', 0, 0, 0, mousemsg_handler, &data);
     mapper_signal sigCalib = mdev_add_input(receiver, "/calibration", 4, 'f', 0, 0, 0, calibmsg_handler, &calib);
 
     gIsRunning = 1;
     while(gIsRunning)
     {
-        mdev_poll(receiver, 50);
+        mdev_poll(receiver, 25);
         int value;
-
-        if (data.updated)
-        {
-            state_send_signal(&current, "position", &data);
-        }
-        else
-        {
-            state_send_signal(&current, "no_position", &data);
-        }
-
-        printf("%f %f - %s\n", data.x, data.y, current->name);
 
         int allSet = 1;
         for (int i = 0; i < 4; ++i)
@@ -280,12 +280,12 @@ int main(int argc, char** argv)
             CvPoint2D32f outPoints[4];
             outPoints[0].x = MARKER_SIZE;
             outPoints[0].y = MARKER_SIZE;
-            outPoints[1].x = 1400.f - MARKER_SIZE;
+            outPoints[1].x = 1024.f - MARKER_SIZE;
             outPoints[1].y = MARKER_SIZE;
             outPoints[2].x = MARKER_SIZE;
-            outPoints[2].y = 1050.f - MARKER_SIZE;
-            outPoints[3].x = 1400.f - MARKER_SIZE;
-            outPoints[3].y = 1050.f - MARKER_SIZE;
+            outPoints[2].y = 768.f - MARKER_SIZE;
+            outPoints[3].x = 1024.f - MARKER_SIZE;
+            outPoints[3].y = 768.f - MARKER_SIZE;
 
             CvMat* perspectiveMatrix = cvCreateMat(3, 3, CV_64F);
             cvGetPerspectiveTransform(points, outPoints, perspectiveMatrix);
@@ -314,9 +314,17 @@ int main(int argc, char** argv)
             printf("--- %f %f\n", current.val[0], current.val[1]);
         }
 
-        if (strcmp(current->name, "move") == 0)
-            xdo_mousemove(data.display, data.x, data.y, 0);
+        if (data.contact)
+            state_send_signal(&current, "contact", &data);
+        else if (data.updated)
+            state_send_signal(&current, "position", &data);
+        else
+            state_send_signal(&current, "no_position", &data);
 
+        printf("%f %f - %i - %s\n", data.x, data.y, data.contact, current->name);
+
+        if (data.updated)
+            xdo_mousemove(data.display, data.x, data.y, 0);
         data.updated = 0;
     }
 
