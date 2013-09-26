@@ -8,7 +8,7 @@
 #include <xdo.h>
 #include <lo/lo.h>
 
-#define MAX_NOPOSITION 10
+#define MAX_NOPOSITION 30
 #define CLICK_SPEED 5
 #define CLICK_LENGTH 5
 #define MARKER_SIZE 128
