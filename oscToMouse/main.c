@@ -8,9 +8,13 @@
 #include <xdo.h>
 #include <lo/lo.h>
 
+#define MAX_NOPOSITION 10
 #define CLICK_SPEED 5
 #define CLICK_LENGTH 5
 #define MARKER_SIZE 128
+
+#define WIDTH 1024.f
+#define HEIGHT 768.f
 
 int gIsRunning;
 
@@ -105,7 +109,6 @@ typedef struct
     xdo_t* display;
     float x, y;
     int contact;
-    mapper_timetag_t timetag;
     int updated;
 } Data_t;
 
@@ -198,7 +201,6 @@ void mousemsg_handler(mapper_signal msig, mapper_db_signal props, int instance_i
     data->x = x;
     data->y = y;
     data->contact = contact;
-    data->timetag = *tt;
     data->updated = 1;
 }
 
@@ -252,6 +254,9 @@ int oscMouseHandler(const char* path, const char* types, lo_arg** argv, int argc
     }
 
     Data_t* mouseData = (Data_t*)user_data;
+
+    if (values[0] != 0)
+        return 1;
 
     int x, y, contact;
     x = values[1];
@@ -341,8 +346,8 @@ int main(int argc, char** argv)
         calib[i].set = 0;
 
     // libmapper objects
-    mapper_device receiver;
-    mapper_signal sigMouse, sigCalib;
+    mapper_device receiver = NULL;
+    mapper_signal sigMouse = NULL, sigCalib = NULL;
     // liblo objects
     lo_server_thread oscServer = NULL;
     if (useOSC == 0)
@@ -360,16 +365,20 @@ int main(int argc, char** argv)
             return 0;
         }
         lo_server_add_method(oscServer, "/blobserver/depthtouch", NULL, oscMouseHandler, &data);
-        lo_server_add_method(oscServer, "/blobserver/fiducialtracker", NULL, oscCalibrationHandler, &data);
+        lo_server_add_method(oscServer, "/blobserver/fiducialtracker", NULL, oscCalibrationHandler, &calib);
     }
 
     gIsRunning = 1;
+
+    CvMat* perspectiveMatrix = NULL;
+    int isCalibrated = 0;
+    int noPosition = 0;
     while(gIsRunning)
     {
         if (useOSC == 0)
             mdev_poll(receiver, 25);
         else if (useOSC == 1)
-            lo_server_recv_noblock(oscServer, 0);
+            lo_server_recv(oscServer);
 
         int value;
 
@@ -381,7 +390,7 @@ int main(int argc, char** argv)
             else
                 allSet = 0;
         }
-        if (allSet)
+        if (allSet && !isCalibrated)
         {
             CvPoint2D32f points[4];
             for (int i = 0; i < 4; ++i)
@@ -393,52 +402,64 @@ int main(int argc, char** argv)
             CvPoint2D32f outPoints[4];
             outPoints[0].x = MARKER_SIZE;
             outPoints[0].y = MARKER_SIZE;
-            outPoints[1].x = 1024.f - MARKER_SIZE;
+            outPoints[1].x = WIDTH - MARKER_SIZE;
             outPoints[1].y = MARKER_SIZE;
             outPoints[2].x = MARKER_SIZE;
-            outPoints[2].y = 768.f - MARKER_SIZE;
-            outPoints[3].x = 1024.f - MARKER_SIZE;
-            outPoints[3].y = 768.f - MARKER_SIZE;
+            outPoints[2].y = HEIGHT - MARKER_SIZE;
+            outPoints[3].x = WIDTH - MARKER_SIZE;
+            outPoints[3].y = HEIGHT - MARKER_SIZE;
 
-            CvMat* perspectiveMatrix = cvCreateMat(3, 3, CV_64F);
+            perspectiveMatrix = cvCreateMat(3, 3, CV_64F);
             cvGetPerspectiveTransform(points, outPoints, perspectiveMatrix);
 
+            isCalibrated = 1;
+        }
+        else if (isCalibrated && data.updated)
+        {
             CvMat* p = cvCreateMat(1, 1, CV_64FC2);
             CvMat* h = cvCreateMat(1, 1, CV_64FC2);
 
-            CvScalar current;
-            current.val[0] = data.x;
-            current.val[1] = data.y;
+            CvScalar currentPos;
+            currentPos.val[0] = data.x;
+            currentPos.val[1] = data.y;
 
-            cvSet2D(p, 0, 0, current);
+            cvSet2D(p, 0, 0, currentPos);
             cvPerspectiveTransform(p, h, perspectiveMatrix);
-            current = cvGet2D(h, 0, 0);
+            currentPos = cvGet2D(h, 0, 0);
 
-            if (current.val[0] > 0.f && current.val[0] < 1600.f)
-                data.x = current.val[0];
+            if (currentPos.val[0] > 0.f && currentPos.val[0] < WIDTH)
+                data.x = currentPos.val[0];
             else
-                data.x = 800.f;
+                data.x = WIDTH / 2.f;
             
-            if (current.val[1] > 0.f && current.val[1] < 1200.f)
-                data.y = current.val[1];
+            if (currentPos.val[1] > 0.f && currentPos.val[1] < HEIGHT)
+                data.y = currentPos.val[1];
             else
-                data.y = 600.f;
+                data.y = HEIGHT / 2.f;
 
-            printf("--- %f %f\n", current.val[0], current.val[1]);
+            printf("--- %f %f\n", currentPos.val[0], currentPos.val[1]);
+
+            if (data.contact)
+                state_send_signal(&current, "contact", &data);
+            else if (data.updated)
+                state_send_signal(&current, "position", &data);
+    
+            if (data.updated)
+                xdo_mousemove(data.display, data.x, data.y, 0);
+            data.updated = 0;
+            noPosition = 0;
+        }
+        else
+        {
+            noPosition++;
+            if (noPosition >= MAX_NOPOSITION)
+            {
+                state_send_signal(&current, "no_position", &data);
+                noPosition = MAX_NOPOSITION;
+            }
         }
 
-        if (data.contact)
-            state_send_signal(&current, "contact", &data);
-        else if (data.updated)
-            state_send_signal(&current, "position", &data);
-        else
-            state_send_signal(&current, "no_position", &data);
-
         printf("%f %f - %i - %s\n", data.x, data.y, data.contact, current->name);
-
-        if (data.updated)
-            xdo_mousemove(data.display, data.x, data.y, 0);
-        data.updated = 0;
     }
 
     free_state_machine(root);
