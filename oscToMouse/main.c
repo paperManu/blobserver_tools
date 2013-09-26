@@ -6,6 +6,7 @@
 #include <opencv/cv.h>
 #include <mapper/mapper.h>
 #include <xdo.h>
+#include <lo/lo.h>
 
 #define CLICK_SPEED 5
 #define CLICK_LENGTH 5
@@ -220,6 +221,89 @@ void calibmsg_handler(mapper_signal msig, mapper_db_signal props, int instance_i
 }
 
 /*************/
+void oscErrorHandler(int num, const char* msg, const char* path)
+{
+    printf("Liblo server error: %s\n", msg);
+}
+
+/*************/
+int oscMouseHandler(const char* path, const char* types, lo_arg** argv, int argc, void* data, void* user_data)
+{
+    if (argc != 6)
+    {
+        printf("%s - Received message seems to be wrongly formed\n", __FUNCTION__);
+        return -1;
+    }
+
+    float values[5];
+    for (int i = 0; i < argc; ++i)
+    {
+        if (types[i] == 'f')
+            values[i] = argv[i]->f;
+        else if (types[i] == 'i')
+            values[i] = argv[i]->i;
+        else if (types[i] == 'd')
+            values[i] = argv[i]->d;
+        else
+        {
+            printf("%s - Received something which is not a number\n", __FUNCTION__);
+            return -1;
+        }   
+    }
+
+    Data_t* mouseData = (Data_t*)user_data;
+
+    int x, y, contact;
+    x = values[1];
+    y = values[2];
+    contact = values[5];
+
+    mouseData->x = x;
+    mouseData->y = y;
+    mouseData->contact = contact;
+    mouseData->updated = 1;
+}
+
+/*************/
+int oscCalibrationHandler(const char* path, const char* types, lo_arg** argv, int argc, void* data, void* user_data)
+{
+    if (argc != 4)
+    {
+        printf("%s - Received message seems to be wrongly formed\n", __FUNCTION__);
+        return -1;
+    }
+
+    float values[4];
+    for (int i = 0; i < argc; ++i)
+    {
+        if (types[i] == 'f')
+            values[i] = argv[i]->f;
+        else if (types[i] == 'i')
+            values[i] = argv[i]->i;
+        else if (types[i] == 'd')
+            values[i] = argv[i]->d;
+        else
+        {
+            printf("%s - Received something which is not a number\n", __FUNCTION__);
+            return -1;
+        }
+    }
+
+    Calib_t* calib = (Calib_t*)user_data;
+    int id, x, y;
+    id = values[0];
+    x = values[1];
+    y = values[2];
+
+    if (id < 4)
+    {
+        calib[id].set = 1;
+        calib[id].x = x;
+        calib[id].y = y;
+    }
+}
+
+/*************/
 void leave(int sig)
 {
     gIsRunning = 0;
@@ -231,8 +315,14 @@ int main(int argc, char** argv)
     (void) signal(SIGINT, leave);
 
     int msgLength = 4;
+    int useOSC = 0;
     if (argc > 1)
-        msgLength = atoi(argv[1]);
+    {
+        if (strcmp(argv[1], "--osc") == 0)
+            useOSC = 1;
+        else
+            msgLength = atoi(argv[1]);
+    }
 
     State_t* root = init_state_machine();
     State_t* current = root;
@@ -250,14 +340,37 @@ int main(int argc, char** argv)
     for (int i = 0; i < 4; ++i)
         calib[i].set = 0;
 
-    mapper_device receiver = mdev_new("oscToMouse", 9700, 0);
-    mapper_signal sigMouse = mdev_add_input(receiver, "/mouse", 6, 'f', 0, 0, 0, mousemsg_handler, &data);
-    mapper_signal sigCalib = mdev_add_input(receiver, "/calibration", 4, 'f', 0, 0, 0, calibmsg_handler, &calib);
+    // libmapper objects
+    mapper_device receiver;
+    mapper_signal sigMouse, sigCalib;
+    // liblo objects
+    lo_server_thread oscServer = NULL;
+    if (useOSC == 0)
+    {
+        receiver = mdev_new("oscToMouse", 9700, 0);
+        sigMouse = mdev_add_input(receiver, "/mouse", 6, 'f', 0, 0, 0, mousemsg_handler, &data);
+        sigCalib = mdev_add_input(receiver, "/calibration", 4, 'f', 0, 0, 0, calibmsg_handler, &calib);
+    }
+    else if (useOSC == 1)
+    {
+        oscServer = lo_server_new("9000", oscErrorHandler);
+        if (oscServer == NULL)
+        {
+            printf("%s - Error while creating liblo server\n", __FUNCTION__);
+            return 0;
+        }
+        lo_server_add_method(oscServer, "/blobserver/depthtouch", NULL, oscMouseHandler, &data);
+        lo_server_add_method(oscServer, "/blobserver/fiducialtracker", NULL, oscCalibrationHandler, &data);
+    }
 
     gIsRunning = 1;
     while(gIsRunning)
     {
-        mdev_poll(receiver, 25);
+        if (useOSC == 0)
+            mdev_poll(receiver, 25);
+        else if (useOSC == 1)
+            lo_server_recv_noblock(oscServer, 0);
+
         int value;
 
         int allSet = 1;
